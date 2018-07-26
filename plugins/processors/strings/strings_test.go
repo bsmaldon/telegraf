@@ -1,4 +1,4 @@
-package lowercase
+package strings
 
 import (
 	"testing"
@@ -44,22 +44,33 @@ func newM2() telegraf.Metric {
 func TestFieldConversions(t *testing.T) {
 	tests := []struct {
 		message        string
-		converter      converter
+		lowercase      converter
+        uppercase      converter
+        trim           converter
 		expectedFields map[string]interface{}
 	}{
 		{
-			message: "Should change existing field",
-			converter: converter{
-				Key:         "request",
+			message: "Should change existing field to lowercase",
+			lowercase: converter{
+				Field:         "request",
 			},
 			expectedFields: map[string]interface{}{
                 "request": "/mixed/case/path/?from=-1d&to=now",
 			},
 		},
 		{
-			message: "Should add new field",
-			converter: converter{
-				Key:         "request",
+			message: "Should change existing field to uppercase",
+			uppercase: converter{
+				Field:         "request",
+			},
+			expectedFields: map[string]interface{}{
+                "request": "/MIXED/CASE/PATH/?FROM=-1D&TO=NOW",
+			},
+		},
+		{
+			message: "Should add new lowercase field",
+			lowercase: converter{
+				Field:         "request",
 				ResultKey:   "lowercase_request",
 			},
 			expectedFields: map[string]interface{}{
@@ -67,15 +78,44 @@ func TestFieldConversions(t *testing.T) {
                 "lowercase_request": "/mixed/case/path/?from=-1d&to=now",
 			},
 		},
+		{
+			message: "Should trim from both sides",
+			trim: converter{
+				Field:         "request",
+                Argument:      "/w",
+			},
+			expectedFields: map[string]interface{}{
+                "request": "mixed/CASE/paTH/?from=-1D&to=no",
+			},
+		},
+		{
+			message: "Should trim from both sides and make lowercase",
+			trim: converter{
+				Field:         "request",
+                Argument:      "/w",
+			},
+            lowercase: converter{
+                Field:         "request",
+            },
+			expectedFields: map[string]interface{}{
+                "request": "mixed/case/path/?from=-1d&to=no",
+			},
+		},
 	}
 
 	for _, test := range tests {
-		lowercase := &Lowercase{}
-		lowercase.Fields = []converter{
-			test.converter,
+		strings := &Strings{}
+		strings.Lowercase = []converter{
+			test.lowercase,
 		}
+        strings.Uppercase = []converter{
+            test.uppercase,
+        }
+        strings.Trim = []converter{
+            test.trim,
+        }
 
-		processed := lowercase.Apply(newM1())
+		processed := strings.Apply(newM1())
 
 		expectedTags := map[string]string{
 			"verb":           "GET",
@@ -91,13 +131,14 @@ func TestFieldConversions(t *testing.T) {
 func TestTagConversions(t *testing.T) {
 	tests := []struct {
 		message      string
-		converter    converter
+		lowercase    converter
+        uppercase    converter
 		expectedTags map[string]string
 	}{
 		{
-			message: "Should change existing tag",
-			converter: converter{
-				Key:         "s-computername",
+			message: "Should change existing tag to lowercase",
+			lowercase: converter{
+				Tag:         "s-computername",
 			},
 			expectedTags: map[string]string{
 				"verb":    "GET",
@@ -105,9 +146,9 @@ func TestTagConversions(t *testing.T) {
 			},
 		},
 		{
-			message: "Should add new tag",
-			converter: converter{
-				Key:         "s-computername",
+			message: "Should add new lowercase tag",
+			lowercase: converter{
+				Tag:         "s-computername",
 				ResultKey:   "s-computername_lowercase",
 			},
 			expectedTags: map[string]string{
@@ -116,15 +157,30 @@ func TestTagConversions(t *testing.T) {
                 "s-computername_lowercase": "mixedcase_hostname",
 			},
 		},
+		{
+			message: "Should add new uppercase tag",
+			uppercase: converter{
+				Tag:         "s-computername",
+				ResultKey:   "s-computername_uppercase",
+			},
+			expectedTags: map[string]string{
+				"verb":       "GET",
+                "s-computername": "MIXEDCASE_hostname",
+                "s-computername_uppercase": "MIXEDCASE_HOSTNAME",
+			},
+		},
 	}
 
 	for _, test := range tests {
-		lowercase := &Lowercase{}
-		lowercase.Tags = []converter{
-			test.converter,
+		strings := &Strings{}
+		strings.Lowercase = []converter{
+			test.lowercase,
+		}
+		strings.Uppercase = []converter{
+			test.uppercase,
 		}
 
-		processed := lowercase.Apply(newM1())
+		processed := strings.Apply(newM1())
 
 		expectedFields := map[string]interface{}{
             "request": "/mixed/CASE/paTH/?from=-1D&to=now",
@@ -137,26 +193,26 @@ func TestTagConversions(t *testing.T) {
 }
 
 func TestMultipleConversions(t *testing.T) {
-	lowercase := &Lowercase{}
-	lowercase.Tags = []converter{
+	strings := &Strings{}
+	strings.Lowercase = []converter{
 		{
-			Key:         "verb",
+			Tag:         "s-computername",
 		},
 		{
-			Key:         "s-computername",
-		},
-	}
-	lowercase.Fields = []converter{
-		{
-			Key:         "request",
+			Field:       "request",
 		},
 		{
-			Key:         "cs-host",
+			Field:       "cs-host",
 			ResultKey:   "cs-host_lowercase",
 		},
 	}
+    strings.Uppercase = []converter{
+        {
+            Tag:        "verb",
+        },
+    }
 
-	processed := lowercase.Apply(newM2())
+	processed := strings.Apply(newM2())
 
 	expectedFields := map[string]interface{}{
         "request":           "/mixed/case/path/?from=-1d&to=now",
@@ -166,7 +222,7 @@ func TestMultipleConversions(t *testing.T) {
         "cs-host_lowercase": "aaabbb",
 	}
 	expectedTags := map[string]string{
-		"verb":           "get",
+		"verb":           "GET",
         "resp_code":      "200",
         "s-computername": "mixedcase_hostname",
 	}
@@ -184,7 +240,7 @@ func TestNoKey(t *testing.T) {
 		{
 			message: "Should not change anything if there is no field with given key",
 			converter: converter{
-				Key:         "not_exists",
+				Field:         "not_exists",
 			},
 			expectedFields: map[string]interface{}{
                 "request": "/mixed/CASE/paTH/?from=-1D&to=now",
@@ -193,12 +249,12 @@ func TestNoKey(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		lowercase := &Lowercase{}
-		lowercase.Fields = []converter{
+		strings := &Strings{}
+		strings.Lowercase = []converter{
 			test.converter,
 		}
 
-		processed := lowercase.Apply(newM1())
+		processed := strings.Apply(newM1())
 
 		assert.Equal(t, test.expectedFields, processed[0].Fields(), test.message)
 	}
